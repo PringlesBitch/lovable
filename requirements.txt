@@ -1,0 +1,8 @@
+openai
+gspread
+google-auth
+google-api-python-client
+playwright
+python-dotenv
+httpx
+tenacity

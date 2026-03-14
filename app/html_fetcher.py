@@ -1,0 +1,1 @@
+"""Nacitani HTML obsahu webu.""" 

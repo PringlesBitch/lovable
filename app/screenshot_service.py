@@ -1,0 +1,1 @@
+"""Sluzba pro porizovani screenshotu.""" 

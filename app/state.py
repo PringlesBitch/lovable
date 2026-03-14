@@ -1,0 +1,1 @@
+"""Sprava stavu pipeline.""" 

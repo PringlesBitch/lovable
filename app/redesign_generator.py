@@ -1,0 +1,1 @@
+"""Generovani navrhu redesignu.""" 
