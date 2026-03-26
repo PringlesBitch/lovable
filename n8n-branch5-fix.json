@@ -1,0 +1,235 @@
+{
+  "name": "Branch 5 - Gmail Draft se 2 screenshoty (mapování sloupců)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ManualTrigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $json || {};\n\nconst fromKnownNode = (name) => {\n  try {\n    const item = $(name).first();\n    if (item && item.json && Object.keys(item.json).length) return item.json;\n  } catch (e) {}\n  return null;\n};\n\nconst fallbackNodes = [\n  'Read Rows',\n  'Google Sheets',\n  'Get row(s) in sheet',\n  'Get Rows',\n  'Rows',\n  'Sheet Row',\n  'Get Sheet Row',\n  'Vytipované weby',\n  'Read rows from Vytipované weby'\n];\n\nconst pickRowObject = (obj) => {\n  if (!obj) return {};\n  if (obj.row && typeof obj.row === 'object') return obj.row;\n  if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) return obj.data;\n  if (Array.isArray(obj.rows) && obj.rows.length && typeof obj.rows[0] === 'object') return obj.rows[0];\n  if (Array.isArray(obj.data) && obj.data.length && typeof obj.data[0] === 'object') return obj.data[0];\n  return obj;\n};\n\nlet row = pickRowObject(src);\n\nif (!Object.keys(row || {}).length) {\n  for (const nodeName of fallbackNodes) {\n    const candidate = fromKnownNode(nodeName);\n    if (candidate && Object.keys(candidate).length) {\n      row = pickRowObject(candidate);\n      if (Object.keys(row || {}).length) break;\n    }\n  }\n}\n\nconst normalize = (s) => String(s || '')\n  .normalize('NFD').replace(/[̀-ͯ]/g, '')\n  .toLowerCase()\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst normalizedRow = {};\nfor (const [k, v] of Object.entries(row || {})) normalizedRow[normalize(k)] = v;\n\nconst pick = (...keys) => {\n  for (const k of keys) {\n    const direct = row[k];\n    if (direct !== undefined && direct !== null && String(direct).trim() !== '') return String(direct).trim();\n    const norm = normalizedRow[normalize(k)];\n    if (norm !== undefined && norm !== null && String(norm).trim() !== '') return String(norm).trim();\n  }\n  return '';\n};\n\nconst availableKeys = Object.keys(row || {});\nif (!availableKeys.length) {\n  throw new Error('Input row is empty. Tato větev musí dostat 1 řádek z Google Sheets (list Vytipované weby) nebo node s jedním z názvů fallbackNodes.');\n}\n\nconst emailRaw = pick('Email adresa', 'Email  adresa', 'Email', 'email', 'E-mail');\nconst to = emailRaw.includes(',') ? emailRaw.split(',')[0].trim() : emailRaw;\nconst subject = pick('Email predmet', 'Email předmět', 'Predmet', 'Předmět', 'subject');\nconst body = pick('Email telo', 'Email tělo', 'Telo', 'Tělo', 'body');\nconst screenshotAfterUrl = pick('Screenshot URL', 'Screenshot Url', 'screenshotAfterUrl', 'afterScreenshotUrl');\nconst screenshotBeforeUrl = pick('Before Screenshot URL', 'Before screenshot URL', 'beforeScreenshotUrl', 'screenshotBeforeUrl');\n\nconst missing = [];\nif (!to) missing.push('Email adresa/Email');\nif (!subject) missing.push('Email predmet');\nif (!body) missing.push('Email telo');\nif (!screenshotAfterUrl) missing.push('Screenshot URL');\nif (!screenshotBeforeUrl) missing.push('Before Screenshot URL');\nif (missing.length) throw new Error(`Missing required columns: ${missing.join(', ')} | Available keys: ${availableKeys.join(', ')}`);\n\nreturn [{ json: { ...row, to, subject, body, screenshotAfterUrl, screenshotBeforeUrl } }];"
+      },
+      "id": "PrepareEmailFromSheet",
+      "name": "Prepare + Validate Email From Sheet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.screenshotAfterUrl }}",
+        "options": {
+          "ignoreSslIssues": true,
+          "allowUnauthorizedCerts": true
+        },
+        "responseFormat": "file",
+        "outputPropertyName": "data"
+      },
+      "id": "GetScreenshotAfter",
+      "name": "Get Screenshot (After)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.screenshotBeforeUrl }}",
+        "options": {
+          "ignoreSslIssues": true,
+          "allowUnauthorizedCerts": true
+        },
+        "responseFormat": "file",
+        "outputPropertyName": "data"
+      },
+      "id": "GetScreenshotBefore",
+      "name": "Get Screenshot (Before)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "WaitForBothScreenshots",
+      "name": "Wait for Both Screenshots",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        940,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const mail = $('Prepare + Validate Email From Sheet').first();\nconst shotAfter = $('Get Screenshot (After)').first();\nconst shotBefore = $('Get Screenshot (Before)').first();\n\nconst bAfter = shotAfter?.binary?.data || shotAfter?.binary?.file;\nconst bBefore = shotBefore?.binary?.data || shotBefore?.binary?.file;\n\nif (!mail?.json?.to) throw new Error('Chybí příjemce: sloupec Email adresa nebo Email.');\nif (!mail?.json?.subject) throw new Error('Chybí předmět: sloupec Email predmet.');\nif (!mail?.json?.body) throw new Error('Chybí tělo: sloupec Email telo.');\nif (!bAfter || !bBefore) throw new Error('Chybí screenshoty: Screenshot URL / Before Screenshot URL.');\n\nreturn [{\n  json: {\n    to: String(mail.json.to).trim(),\n    subject: String(mail.json.subject),\n    body: String(mail.json.body)\n  },\n  binary: {\n    screenshot1: {\n      ...bAfter,\n      fileName: bAfter.fileName || 'after-screenshot.jpg'\n    },\n    screenshot2: {\n      ...bBefore,\n      fileName: bBefore.fileName || 'before-screenshot.jpg'\n    }\n  }\n}];"
+      },
+      "id": "BuildDraftPayload",
+      "name": "Build Draft Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "toList": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "emailType": "text",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "screenshot1"
+              },
+              {
+                "property": "screenshot2"
+              }
+            ]
+          }
+        }
+      },
+      "id": "CreateGmailDraft",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1380,
+        260
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = $input.first()?.json || {};\nconst draftId = out.id || out.draftId || out.data?.id || out.data?.draftId || out.result?.id;\nconst messageId = out.message?.id || out.messageId || out.data?.message?.id || null;\n\nif (!draftId) {\n  throw new Error(`Gmail node doběhl bez draft ID. Výstup: ${JSON.stringify(out)}`);\n}\n\nconst composeToken = messageId || draftId;\nconst draftUrl = `https://mail.google.com/mail/u/0/#drafts?compose=${composeToken}`;\n\nreturn [{\n  json: {\n    ...out,\n    draftId,\n    messageId,\n    draftCreated: true,\n    draftUrl\n  }\n}];"
+      },
+      "id": "VerifyDraftCreated",
+      "name": "Verify Draft Created",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare + Validate Email From Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Screenshot (After)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Both Screenshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Screenshot (Before)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Both Screenshots",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Wait for Both Screenshots": {
+      "main": [
+        [
+          {
+            "node": "Build Draft Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Draft Payload": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gmail Draft": {
+      "main": [
+        [
+          {
+            "node": "Verify Draft Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare + Validate Email From Sheet": {
+      "main": [
+        [
+          {
+            "node": "Get Screenshot (After)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Screenshot (Before)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "branch5-fix-v12"
+}
